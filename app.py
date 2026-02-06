@@ -5,45 +5,26 @@ from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-# URL de tu nodo online
 NODE_URL = "https://velcoin.onrender.com"
 
-# Archivos locales para guardar datos
 BLOCKS_FILE = "blocks.json"
 WALLET_HISTORY_FILE = "wallet_history.json"
 
-# Crear archivos si no existen
+# Asegurarse de que existan los archivos locales
 for f, default in [(BLOCKS_FILE, []), (WALLET_HISTORY_FILE, [])]:
     if not os.path.exists(f):
         with open(f, "w") as file:
             json.dump(default, file)
 
-def fetch_blocks_from_node():
+def fetch_node_data(endpoint):
+    """Consulta el nodo y devuelve JSON si existe, si no devuelve lista vacía"""
     try:
-        # Intentamos traer bloques del nodo
-        resp = requests.get(f"{NODE_URL}/chain")
-        if resp.status_code == 200:
-            blocks = resp.json()
-            with open(BLOCKS_FILE, "w") as f:
-                json.dump(blocks, f)
-            return blocks
-        else:
-            return json.load(open(BLOCKS_FILE))
-    except Exception:
-        return json.load(open(BLOCKS_FILE))
-
-def fetch_transactions_from_node():
-    try:
-        resp = requests.get(f"{NODE_URL}/transactions")
-        if resp.status_code == 200:
-            txs = resp.json()
-            with open(WALLET_HISTORY_FILE, "w") as f:
-                json.dump(txs, f)
-            return txs
-        else:
-            return json.load(open(WALLET_HISTORY_FILE))
-    except Exception:
-        return json.load(open(WALLET_HISTORY_FILE))
+        r = requests.get(f"{NODE_URL}/{endpoint}", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException:
+        # Si falla, devolvemos lista vacía
+        return []
 
 @app.route("/")
 def index():
@@ -51,27 +32,30 @@ def index():
 
 @app.route("/balance/<address>")
 def balance(address):
-    txs = fetch_transactions_from_node()
+    # Consultar todas las transacciones del nodo
+    txs = fetch_node_data("transactions")
     balance = 0
     for tx in txs:
-        if tx.get("to") == address:
-            balance += tx.get("amount", 0)
-        if tx.get("from") == address:
-            balance -= tx.get("amount", 0)
+        if tx["to"] == address:
+            balance += tx["amount"]
+        if tx["from"] == address:
+            balance -= tx["amount"]
     return jsonify({"address": address, "balance": balance, "symbol": "VLC"})
 
 @app.route("/blocks")
 def blocks():
-    blocks = fetch_blocks_from_node()
+    # Trae bloques del nodo
+    blocks = fetch_node_data("chain")
     return jsonify(blocks)
 
 @app.route("/transactions")
 def transactions():
-    txs = fetch_transactions_from_node()
+    txs = fetch_node_data("transactions")
     return jsonify(txs)
 
 @app.route("/nodes")
 def nodes():
+    # Solo devuelve el nodo principal
     return jsonify({"seed_nodes": [NODE_URL]})
 
 if __name__ == "__main__":
