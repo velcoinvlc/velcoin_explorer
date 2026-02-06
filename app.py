@@ -1,20 +1,49 @@
 import os
 import json
-from flask import Flask, jsonify, request
 import requests
+from flask import Flask, jsonify
 
 app = Flask(__name__)
 
+# URL de tu nodo online
 NODE_URL = "https://velcoin.onrender.com"
 
+# Archivos locales para guardar datos
 BLOCKS_FILE = "blocks.json"
 WALLET_HISTORY_FILE = "wallet_history.json"
 
-# Asegurarse de que existan los archivos locales
+# Crear archivos si no existen
 for f, default in [(BLOCKS_FILE, []), (WALLET_HISTORY_FILE, [])]:
     if not os.path.exists(f):
         with open(f, "w") as file:
             json.dump(default, file)
+
+def fetch_blocks_from_node():
+    try:
+        # Intentamos traer bloques del nodo
+        resp = requests.get(f"{NODE_URL}/chain")
+        if resp.status_code == 200:
+            blocks = resp.json()
+            with open(BLOCKS_FILE, "w") as f:
+                json.dump(blocks, f)
+            return blocks
+        else:
+            return json.load(open(BLOCKS_FILE))
+    except Exception:
+        return json.load(open(BLOCKS_FILE))
+
+def fetch_transactions_from_node():
+    try:
+        resp = requests.get(f"{NODE_URL}/transactions")
+        if resp.status_code == 200:
+            txs = resp.json()
+            with open(WALLET_HISTORY_FILE, "w") as f:
+                json.dump(txs, f)
+            return txs
+        else:
+            return json.load(open(WALLET_HISTORY_FILE))
+    except Exception:
+        return json.load(open(WALLET_HISTORY_FILE))
 
 @app.route("/")
 def index():
@@ -22,53 +51,24 @@ def index():
 
 @app.route("/balance/<address>")
 def balance(address):
-    try:
-        # Consultar balance real del nodo
-        r = requests.get(f"{NODE_URL}/balance/{address}")
-        r.raise_for_status()
-        return jsonify(r.json())
-    except Exception as e:
-        # fallback a historial local
-        with open(WALLET_HISTORY_FILE) as f:
-            txs = json.load(f)
-        balance = 0
-        for tx in txs:
-            if tx["to"] == address:
-                balance += tx["amount"]
-            if tx["from"] == address:
-                balance -= tx["amount"]
-        return jsonify({"address": address, "balance": balance, "symbol": "VLC", "note": "fallback local"})
+    txs = fetch_transactions_from_node()
+    balance = 0
+    for tx in txs:
+        if tx.get("to") == address:
+            balance += tx.get("amount", 0)
+        if tx.get("from") == address:
+            balance -= tx.get("amount", 0)
+    return jsonify({"address": address, "balance": balance, "symbol": "VLC"})
 
 @app.route("/blocks")
 def blocks():
-    with open(BLOCKS_FILE) as f:
-        blocks = json.load(f)
+    blocks = fetch_blocks_from_node()
     return jsonify(blocks)
 
 @app.route("/transactions")
 def transactions():
-    with open(WALLET_HISTORY_FILE) as f:
-        txs = json.load(f)
+    txs = fetch_transactions_from_node()
     return jsonify(txs)
-
-@app.route("/register_tx", methods=["POST"])
-def register_tx():
-    data = request.get_json()
-    required_fields = ["txid", "from", "to", "amount", "timestamp"]
-    if not all(field in data for field in required_fields):
-        return jsonify({"error": "missing fields"}), 400
-
-    # Leer wallet_history.json
-    with open(WALLET_HISTORY_FILE) as f:
-        txs = json.load(f)
-    # Evitar tx duplicadas
-    if any(tx["txid"] == data["txid"] for tx in txs):
-        return jsonify({"message": "transaction already registered"}), 200
-
-    txs.append(data)
-    with open(WALLET_HISTORY_FILE, "w") as f:
-        json.dump(txs, f, indent=2)
-    return jsonify({"message": "transaction registered"}), 201
 
 @app.route("/nodes")
 def nodes():
