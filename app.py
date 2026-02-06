@@ -5,26 +5,8 @@ from flask import Flask, jsonify
 
 app = Flask(__name__)
 
+# URL del nodo VelCoin
 NODE_URL = "https://velcoin.onrender.com"
-
-BLOCKS_FILE = "blocks.json"
-WALLET_HISTORY_FILE = "wallet_history.json"
-
-# Asegurarse de que existan los archivos locales
-for f, default in [(BLOCKS_FILE, []), (WALLET_HISTORY_FILE, [])]:
-    if not os.path.exists(f):
-        with open(f, "w") as file:
-            json.dump(default, file)
-
-def fetch_node_data(endpoint):
-    """Consulta el nodo y devuelve JSON si existe, si no devuelve lista vacía"""
-    try:
-        r = requests.get(f"{NODE_URL}/{endpoint}", timeout=5)
-        r.raise_for_status()
-        return r.json()
-    except requests.RequestException:
-        # Si falla, devolvemos lista vacía
-        return []
 
 @app.route("/")
 def index():
@@ -32,30 +14,46 @@ def index():
 
 @app.route("/balance/<address>")
 def balance(address):
-    # Consultar todas las transacciones del nodo
-    txs = fetch_node_data("transactions")
-    balance = 0
-    for tx in txs:
-        if tx["to"] == address:
-            balance += tx["amount"]
-        if tx["from"] == address:
-            balance -= tx["amount"]
-    return jsonify({"address": address, "balance": balance, "symbol": "VLC"})
-
-@app.route("/blocks")
-def blocks():
-    # Trae bloques del nodo
-    blocks = fetch_node_data("chain")
-    return jsonify(blocks)
+    """
+    Consulta el balance de una wallet directamente desde el nodo.
+    """
+    try:
+        resp = requests.get(f"{NODE_URL}/balance/{address}", timeout=5)
+        resp.raise_for_status()
+        return jsonify(resp.json())
+    except requests.RequestException as e:
+        return jsonify({"error": "No se pudo obtener balance del nodo", "details": str(e)}), 500
 
 @app.route("/transactions")
 def transactions():
-    txs = fetch_node_data("transactions")
-    return jsonify(txs)
+    """
+    Obtiene todas las transacciones del nodo directamente desde /ledger.
+    """
+    try:
+        resp = requests.get(f"{NODE_URL}/ledger", timeout=5)
+        resp.raise_for_status()
+        return jsonify(resp.json())
+    except requests.RequestException as e:
+        return jsonify({"error": "No se pudo obtener transacciones del nodo", "details": str(e)}), 500
+
+@app.route("/blocks")
+def blocks():
+    """
+    Retorna los bloques locales del explorer (opcional, solo demo)
+    """
+    blocks_file = "blocks.json"
+    if not os.path.exists(blocks_file):
+        with open(blocks_file, "w") as f:
+            json.dump([], f)
+    with open(blocks_file) as f:
+        blocks = json.load(f)
+    return jsonify(blocks)
 
 @app.route("/nodes")
 def nodes():
-    # Solo devuelve el nodo principal
+    """
+    Lista los nodos semilla. Para ahora solo nuestro nodo principal.
+    """
     return jsonify({"seed_nodes": [NODE_URL]})
 
 if __name__ == "__main__":
